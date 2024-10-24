@@ -1,0 +1,30 @@
+.
+├── dist
+│   ├── __mocks__
+│   │   └── openai.d.ts
+│   ├── core.d.ts
+│   ├── index.d.ts
+│   ├── index.js
+│   ├── repl.d.ts
+│   ├── types.d.ts
+│   └── util.d.ts
+├── examples
+│   └── agents.ts
+├── src
+│   ├── __mocks__
+│   │   └── openai.ts
+│   ├── core.ts
+│   ├── index.ts
+│   ├── repl.ts
+│   ├── types.ts
+│   └── util.ts
+├── babel.config.js
+├── bun.lockb
+├── package.json
+├── pnpm-lock.yaml
+├── README.md
+├── swarm-node.code-workspace
+├── tree.txt
+└── tsconfig.json
+
+6 directories, 22 files
