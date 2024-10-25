@@ -1,6 +1,6 @@
 import OpenAI from 'openai';
 import { Agent, Response, createResponse, Result, createResult, ToolCall } from './types';
-import { debugPrint, mergeChunk, functionToJson, FunctionJson } from './util';
+import { debugPrint, mergeChunk, functionToJson, FunctionJson } from './utils';
 import dotenv from 'dotenv';
 
 dotenv.config();
