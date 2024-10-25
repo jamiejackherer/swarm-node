@@ -5,32 +5,59 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+/**
+ * The name of the context variables in the function parameters.
+ */
 const CTX_VARS_NAME = "context_variables";
 
+/**
+ * Type alias for context variables.
+ */
 type ContextVariables = Record<string, string>;
 
+/**
+ * Retrieves a context variable by key.
+ * @param variables - The context variables object.
+ * @param key - The key of the variable to retrieve.
+ * @returns The value of the context variable, or an empty string if not found.
+ */
 function getContextVariable(variables: ContextVariables, key: string): string {
     return variables[key] || '';
 }
 
-// Extend ChatCompletionMessage to include sender
+/**
+ * Extended type for ChatCompletionMessage to include sender and additional properties.
+ */
 type ExtendedChatCompletionMessage = OpenAI.ChatCompletionMessage & {
     sender?: string;
     tool_calls?: OpenAI.ChatCompletionMessageToolCall[];
     refusal: string | null;
 };
 
+/**
+ * Extended type for ChatCompletionChunk delta to include sender.
+ */
 type ExtendedDelta = OpenAI.Chat.Completions.ChatCompletionChunk['choices'][0]['delta'] & {
     sender?: string;
 };
 
+/**
+ * Extended type for ChatCompletionCreateParams to include parallel_tool_calls.
+ */
 type ExtendedChatCompletionCreateParams = OpenAI.Chat.Completions.ChatCompletionCreateParams & {
     parallel_tool_calls?: number;
 };
 
+/**
+ * The main Swarm class that handles the interaction with OpenAI's API and manages the conversation flow.
+ */
 export class Swarm {
     private client: OpenAI;
 
+    /**
+     * Constructs a new Swarm instance.
+     * @throws Error if OPENAI_API_KEY is not set in the environment variables.
+     */
     constructor() {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
@@ -39,15 +66,31 @@ export class Swarm {
         this.client = new OpenAI({ apiKey });
     }
 
-    private getSystemMessage(agent: Agent, contextVariables: Record<string, any>): OpenAI.ChatCompletionMessageParam {
+    /**
+     * Retrieves the system message for an agent.
+     * @param agent - The agent to get the system message for.
+     * @param contextVariables - The context variables.
+     * @returns A promise that resolves to the system message.
+     */
+    private async getSystemMessage(agent: Agent, contextVariables: Record<string, any>): Promise<OpenAI.ChatCompletionMessageParam> {
         return {
             role: "system",
             content: typeof agent.instructions === 'function'
-                ? agent.instructions(contextVariables)
+                ? await agent.instructions(contextVariables)
                 : agent.instructions
         };
     }
 
+    /**
+     * Gets a chat completion from the OpenAI API.
+     * @param agent - The agent to use for the completion.
+     * @param messages - The conversation messages.
+     * @param contextVariables - The context variables.
+     * @param modelOverride - Optional model override.
+     * @param stream - Whether to stream the response.
+     * @param debug - Whether to enable debug mode.
+     * @returns A promise that resolves to the chat completion or an async iterable of chat completion chunks.
+     */
     private async getChatCompletion(
         agent: Agent,
         messages: OpenAI.ChatCompletionMessageParam[],
@@ -56,25 +99,14 @@ export class Swarm {
         stream: boolean,
         debug: boolean
     ): Promise<OpenAI.Chat.Completions.ChatCompletion | AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>> {
-        // Handle callable instructions
-        const instructions = typeof agent.instructions === 'function'
-            ? agent.instructions(contextVariables)
-            : agent.instructions;
-
-        const systemMessage: OpenAI.ChatCompletionSystemMessageParam = {
-            role: "system",
-            content: instructions
-        };
+        const systemMessage = await this.getSystemMessage(agent, contextVariables);
 
         debugPrint(debug, "Getting chat completion for:", [systemMessage, ...messages]);
 
-        const tools: OpenAI.ChatCompletionTool[] = agent.functions.map(f => ({
+        const tools: OpenAI.ChatCompletionTool[] = await Promise.all(agent.functions.map(async f => ({
             type: 'function',
-            function: {
-                name: f.name,
-                ...this.functionToJsonSimple(f.function)
-            }
-        }));
+            function: await this.functionToJsonSimple(f)
+        })));
 
         // Hide context_variables from model in function parameters
         tools.forEach(tool => {
@@ -86,6 +118,8 @@ export class Swarm {
                 }
             }
         });
+
+        console.log("[DEBUG] Tools being sent to API:", JSON.stringify(tools, null, 2));
 
         const createParams: ExtendedChatCompletionCreateParams = {
             model: modelOverride || agent.model,
@@ -102,55 +136,94 @@ export class Swarm {
         return this.client.chat.completions.create(createParams);
     }
 
-    private functionToJsonSimple(func: Function): Partial<FunctionJson['function']> {
-        const funcString = func.toString();
-        const params = funcString.slice(funcString.indexOf('(') + 1, funcString.indexOf(')')).split(',').map(param => param.trim()).filter(Boolean);
-        return {
+    /**
+     * Converts a function to a simplified JSON representation.
+     * @param func - The function to convert.
+     * @returns A promise that resolves to the JSON representation of the function.
+     */
+    private async functionToJsonSimple(func: { name: string, function: Function }): Promise<OpenAI.ChatCompletionCreateParams.Function> {
+        const paramNames = await this.getParamNames(func.function);
+        const result: OpenAI.ChatCompletionCreateParams.Function = {
             name: func.name,
             description: "Function description",
             parameters: {
                 type: "object",
-                properties: Object.fromEntries(params.map(param => [param, { type: "string" }])),
-                required: params
+                properties: Object.fromEntries(paramNames.map(param => [param, { type: "string" }])),
+                required: paramNames
             }
         };
+        console.log(`[DEBUG] Function to JSON result:`, JSON.stringify(result, null, 2));
+        return result;
     }
 
-    private isResult(value: any): value is Result {
+    /**
+     * Gets the parameter names of a function.
+     * @param func - The function to get parameter names for.
+     * @returns A promise that resolves to an array of parameter names.
+     */
+    private async getParamNames(func: Function): Promise<string[]> {
+        const funcStr = func.toString();
+        const match = funcStr.match(/\(([^)]*)\)/);
+        return match ? match[1].split(',').map(param => param.trim()) : [];
+    }
+
+    /**
+     * Checks if a value is a Result object.
+     * @param value - The value to check.
+     * @returns A promise that resolves to true if the value is a Result, false otherwise.
+     */
+    private async isResult(value: any): Promise<boolean> {
         return value && typeof value === 'object' && 'value' in value;
     }
 
-    private isAgent(value: any): value is Agent {
+    /**
+     * Checks if a value is an Agent object.
+     * @param value - The value to check.
+     * @returns A promise that resolves to true if the value is an Agent, false otherwise.
+     */
+    private async isAgent(value: any): Promise<boolean> {
         const isAgent = value && typeof value === 'object' && 'name' in value && 'functions' in value;
         console.log(`[DEBUG] isAgent check: ${isAgent}, value:`, value);
         return isAgent;
     }
 
-    private handleFunctionResult(result: any, debug: boolean): Result {
+    /**
+     * Handles the result of a function call.
+     * @param result - The result to handle.
+     * @param debug - Whether to enable debug mode.
+     * @returns A promise that resolves to a Result object.
+     */
+    private async handleFunctionResult(result: any, debug: boolean): Promise<Result> {
         console.log(`[DEBUG] handleFunctionResult input:`, result);
-        switch (true) {
-            case this.isResult(result):
-                return result;
 
-            case this.isAgent(result):
-                console.log(`[DEBUG] Detected agent in function result: ${result.name}`);
-                return createResult(
-                    JSON.stringify({ assistant: result.name }),
-                    undefined,
-                    result
-                );
-
-            default:
-                try {
-                    return createResult(String(result));
-                } catch (e) {
-                    const errorMessage = `Failed to cast response to string: ${result}. Make sure agent functions return a string or Result object. Error: ${e}`;
-                    debugPrint(debug, errorMessage);
-                    throw new TypeError(errorMessage);
-                }
+        if (await this.isAgent(result)) {
+            console.log(`[DEBUG] Detected agent in function result: ${result.name}`);
+            return {
+                value: JSON.stringify({ agent: result.name }),
+                agent: result,
+                context_variables: result.context || {}
+            };
         }
+
+        if (await this.isResult(result)) {
+            return result;
+        }
+
+        return {
+            value: typeof result === 'string' ? result : JSON.stringify(result),
+            agent: null,
+            context_variables: {}
+        };
     }
 
+    /**
+     * Handles tool calls made by the AI.
+     * @param toolCalls - The tool calls to handle.
+     * @param agent - The current agent.
+     * @param contextVariables - The context variables.
+     * @param debug - Whether to enable debug mode.
+     * @returns A promise that resolves to an object containing messages, context variables, and the potentially updated agent.
+     */
     private async handleToolCalls(
         toolCalls: OpenAI.ChatCompletionMessageToolCall[],
         agent: Agent,
@@ -161,41 +234,53 @@ export class Swarm {
         let newAgent: Agent | undefined;
 
         for (const toolCall of toolCalls) {
+            console.log(`[DEBUG] Full toolCall object:`, JSON.stringify(toolCall, null, 2));
             console.log(`[DEBUG] Handling tool call: ${toolCall.function.name}`);
             const func = agent.functions.find(f => f.name === toolCall.function.name);
             if (!func) {
                 console.error(`Function ${toolCall.function.name} not found`);
+                messages.push({
+                    role: "tool",
+                    tool_call_id: toolCall.id,
+                    content: `Error: Function ${toolCall.function.name} not found`
+                });
                 continue;
             }
 
             const args = JSON.parse(toolCall.function.arguments || '{}');
             const request = getContextVariable(contextVariables, 'request');
             const rawResult = await func.function({ request, ...args });
-            const result = this.handleFunctionResult(rawResult, debug);
+            const result = await this.handleFunctionResult(rawResult, debug);
             console.log(`[DEBUG] Function result:`, result);
 
-            if (this.isAgent(result.value)) {
-                newAgent = result.value;
-                messages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: `Transferring to ${newAgent.name}`
-                });
-                console.log(`[DEBUG] Agent transfer: ${agent.name} -> ${newAgent.name}`);
-                break; // Exit the loop after transferring to a new agent
-            } else {
-                messages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: String(result.value)
-                });
+            if (result.agent) {
+                newAgent = result.agent;
+                contextVariables = { ...contextVariables, ...result.context_variables };
             }
+
+            messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: String(result.value)
+            });
         }
 
         console.log(`[DEBUG] handleToolCalls returning agent: ${(newAgent || agent).name}`);
         return { messages, context_variables: contextVariables, agent: newAgent || agent };
     }
 
+    /**
+     * Runs a conversation with the AI.
+     * @param agent - The starting agent.
+     * @param messages - The initial messages.
+     * @param contextVariables - The initial context variables.
+     * @param modelOverride - Optional model override.
+     * @param stream - Whether to stream the response.
+     * @param debug - Whether to enable debug mode.
+     * @param maxTurns - The maximum number of turns in the conversation.
+     * @param executeTool - Whether to execute tool calls.
+     * @returns A promise that resolves to a Response object.
+     */
     async run(
         agent: Agent,
         messages: OpenAI.ChatCompletionMessageParam[],
@@ -260,6 +345,17 @@ export class Swarm {
         return createResponse(currentMessages.slice(initLen), currentAgent, currentContextVariables);
     }
 
+    /**
+     * Runs a conversation with the AI and streams the response.
+     * @param agent - The starting agent.
+     * @param messages - The initial messages.
+     * @param contextVariables - The initial context variables.
+     * @param modelOverride - Optional model override.
+     * @param debug - Whether to enable debug mode.
+     * @param maxTurns - The maximum number of turns in the conversation.
+     * @param executeTool - Whether to execute tool calls.
+     * @returns An async generator that yields response chunks.
+     */
     async *runAndStream(
         agent: Agent,
         messages: OpenAI.ChatCompletionMessageParam[],
@@ -297,7 +393,9 @@ export class Swarm {
                 for await (const chunk of completion) {
                     const delta = chunk.choices[0].delta;
                     if (delta.role === "assistant") {
-                        (delta as ExtendedDelta).sender = activeAgent.name;
+                        if ('sender' in delta) {
+                            (delta as ExtendedDelta).sender = activeAgent.name;
+                        }
                     }
                     yield delta;
                     mergeChunk(message, delta);
@@ -344,6 +442,11 @@ export class Swarm {
         }
     }
 
+    /**
+     * Checks if a completion is a streaming completion.
+     * @param completion - The completion to check.
+     * @returns True if the completion is a streaming completion, false otherwise.
+     */
     private isStreamingCompletion(
         completion: OpenAI.Chat.Completions.ChatCompletion | AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
     ): completion is AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk> {

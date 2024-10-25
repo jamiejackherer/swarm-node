@@ -1,0 +1,20 @@
+{
+    "entryPoints": [
+        "src/core.ts",
+        "src/types.ts",
+        "src/repl.ts",
+        "src/utils/debug.ts",
+        "src/utils/merge.ts",
+        "src/utils/function-metadata.ts"
+    ],
+    "out": "docs",
+    "excludePrivate": false,
+    "excludeProtected": false,
+    "theme": "default",
+    "name": "Swarm Node Documentation",
+    "readme": "README.md",
+    "includeVersion": true,
+    "categorizeByGroup": true,
+    "searchInComments": true,
+    "tsconfig": "./tsconfig.json"
+}

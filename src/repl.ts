@@ -3,6 +3,11 @@ import readline from 'readline';
 import { Swarm } from './core';
 import { Agent, Response } from './types';
 
+/**
+ * Processes and prints a streaming response from the AI.
+ * @param response - The streaming response to process.
+ * @returns A promise that resolves to the final Response object.
+ */
 async function processAndPrintStreamingResponse(response: AsyncIterable<any>): Promise<Response> {
     let content = "";
     let lastSender = "";
@@ -43,6 +48,10 @@ async function processAndPrintStreamingResponse(response: AsyncIterable<any>): P
     throw new Error("Stream ended without a response");
 }
 
+/**
+ * Pretty prints the messages from the AI response.
+ * @param messages - The messages to print.
+ */
 function prettyPrintMessages(messages: any[]): void {
     for (const message of messages) {
         if (message.role !== "assistant") continue;
@@ -66,6 +75,13 @@ function prettyPrintMessages(messages: any[]): void {
     }
 }
 
+/**
+ * Runs the demo loop for the Swarm CLI.
+ * @param startingAgent - The initial agent to use.
+ * @param contextVariables - Initial context variables.
+ * @param stream - Whether to use streaming mode.
+ * @param debug - Whether to enable debug mode.
+ */
 async function runDemoLoop(
     startingAgent: Agent,
     contextVariables: Record<string, any> = {},
@@ -140,12 +156,20 @@ async function runDemoLoop(
     }
 }
 
-// Type guard for Response
+/**
+ * Type guard to check if an object is a Response.
+ * @param obj - The object to check.
+ * @returns True if the object is a Response, false otherwise.
+ */
 function isResponse(obj: any): obj is Response {
     return obj !== null && typeof obj === 'object' && 'messages' in obj && 'agent' in obj && Array.isArray(obj.messages);
 }
 
-// Type guard for AsyncIterable
+/**
+ * Type guard to check if an object is an AsyncIterable.
+ * @param obj - The object to check.
+ * @returns True if the object is an AsyncIterable, false otherwise.
+ */
 function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
     return obj !== null && typeof obj === 'object' && Symbol.asyncIterator in obj;
 }
