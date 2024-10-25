@@ -1,1 +1,32 @@
-Your entire license text here
+Copyright (c) 2024 Jamie Lindsey
+
+This software is licensed under a modified version of the GNU Affero General Public License (AGPL) version 3, with additional terms:
+
+1. Definitions:
+   a. "Non-Commercial Use" means use that is not primarily intended for or directed towards commercial advantage or monetary compensation.
+   b. "Commercial Use" means any use that is primarily intended for or directed towards commercial advantage or monetary compensation.
+
+2. Non-Commercial Use: You are free to use, modify, and distribute this software for Non-Commercial Use, provided that you include this license and copyright notice with all copies or substantial portions of the software.
+
+3. Commercial Use Restriction: Any Commercial Use of this software, including but not limited to:
+   a. Selling the software or offering it as a paid service
+   b. Incorporating it into a commercial product or service
+   c. Using it in a business or organizational context to generate revenue or reduce costs
+   requires explicit written permission and a separate commercial license from the copyright holder, Jamie Lindsey.
+
+4. Collaboration: You may collaborate on and submit merge requests for this software. All contributions will be subject to this same license.
+
+5. No Warranty: This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose and noninfringement.
+
+6. Liability: In no event shall the authors or copyright holders be liable for any claim, damages or other liability, whether in an action of contract, tort or otherwise, arising from, out of or in connection with the software or the use or other dealings in the software.
+
+7. Network Use: If you use this software in a network server or similar application, you must provide access to the complete corresponding source code to all users interacting with it, as per the terms of the AGPL.
+
+8. Educational and Research Use: Use in educational institutions or for academic research purposes is considered Non-Commercial Use, provided it is not part of a commercial product or service.
+
+9. Determination of Commercial Use: If you are uncertain whether your use qualifies as Commercial or Non-Commercial, you must contact the copyright holder for clarification before using the software.
+
+For the full terms of the GNU Affero General Public License, please see <https://www.gnu.org/licenses/agpl-3.0.en.html>
+
+For commercial licensing inquiries, please contact Jamie Lindsey at [your contact information].
+
