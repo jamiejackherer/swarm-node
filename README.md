@@ -119,7 +119,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under a modified version of the GNU Affero General Public License (AGPL) version 3, with additional terms for commercial use. See the [LICENSE](LICENSE) file for details.
 
 ## Support
 
@@ -129,3 +129,6 @@ If you encounter any problems or have any questions, please open an issue on the
 
 - OpenAI for providing the underlying language model capabilities
 - The open-source community for inspiration and support
+## License
+
+This project is licensed under a modified version of the GNU Affero General Public License (AGPL) version 3, with additional terms for commercial use. See the [LICENSE](LICENSE) file for details.
