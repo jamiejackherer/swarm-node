@@ -1,4 +1,4 @@
-import { Assistant } from './Assistant';
+import { Assistant } from '../agents/Assistant';
 import OpenAI from 'openai';
 
 export class Run {

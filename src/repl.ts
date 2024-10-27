@@ -1,58 +1,19 @@
 import chalk from 'chalk';
 import readline from 'readline';
 import { Swarm } from './core';
-import { Agent, Response } from './types';
-
-/**
- * Processes and prints a streaming response from the AI.
- * @param response - The streaming response to process.
- * @returns A promise that resolves to the final Response object.
- */
-async function processAndPrintStreamingResponse(response: AsyncIterable<any>): Promise<Response> {
-    let content = "";
-    let lastSender = "";
-
-    for await (const chunk of response) {
-        if ("sender" in chunk) {
-            lastSender = chunk.sender;
-        }
-
-        if ("content" in chunk && chunk.content !== null) {
-            if (!content && lastSender) {
-                process.stdout.write(chalk.blue(`${lastSender}: `));
-                lastSender = "";
-            }
-            process.stdout.write(chunk.content);
-            content += chunk.content;
-        }
-
-        if ("tool_calls" in chunk && chunk.tool_calls !== null) {
-            for (const toolCall of chunk.tool_calls) {
-                const f = toolCall.function;
-                const name = f.name;
-                if (!name) continue;
-                console.log(chalk.blue(`${lastSender}: `) + chalk.magenta(`${name}()`));
-            }
-        }
-
-        if ("delim" in chunk && chunk.delim === "end" && content) {
-            console.log();  // End of response message
-            content = "";
-        }
-
-        if ("response" in chunk) {
-            return chunk.response;
-        }
-    }
-
-    throw new Error("Stream ended without a response");
-}
+import { Agent, ContextVariables, Response, Task } from './types';
+import console from 'console';
+import process from 'process';
+import { AssistantsEngine } from './engines/AssistantsEngine';
+import { OpenAI } from 'openai';
+import { Assistant } from './agents/Assistant';
+import { Message, convertToChatMessage, convertFromChatMessage } from './types/Message';
 
 /**
  * Pretty prints the messages from the AI response.
  * @param messages - The messages to print.
  */
-function prettyPrintMessages(messages: any[]): void {
+function prettyPrintMessages(messages: Message[]): void {
     for (const message of messages) {
         if (message.role !== "assistant") continue;
 
@@ -62,36 +23,31 @@ function prettyPrintMessages(messages: any[]): void {
             console.log(message.content);
         }
 
-        const toolCalls = message.tool_calls || [];
-        if (toolCalls.length > 1) {
-            console.log();
-        }
-        for (const toolCall of toolCalls) {
-            const f = toolCall.function;
-            const { name, arguments: args } = f;
-            const argStr = JSON.stringify(JSON.parse(args)).replace(/:/g, "=");
-            console.log(chalk.magenta(`${name}(${argStr.slice(1, -1)})`));
+        if (message.tool) {
+            const argStr = JSON.stringify(message.tool.args).replace(/:/g, "=");
+            console.log(chalk.magenta(`${message.tool.tool}(${argStr.slice(1, -1)})`));
         }
     }
 }
 
 /**
  * Runs the demo loop for the Swarm CLI.
- * @param startingAgent - The initial agent to use.
- * @param contextVariables - Initial context variables.
- * @param stream - Whether to use streaming mode.
- * @param debug - Whether to enable debug mode.
  */
 async function runDemoLoop(
-    startingAgent: Agent,
-    contextVariables: Record<string, any> = {},
+    startingAgent: Agent | Assistant,
+    contextVariables: ContextVariables = {},
     stream: boolean = false,
-    debug: boolean = false
+    debug: boolean = false,
+    engineType: 'swarm' | 'assistants' = 'swarm'
 ): Promise<void> {
-    const client = new Swarm();
-    console.log("Starting Swarm CLI 🐝");
+    const swarmClient = engineType === 'swarm' ? new Swarm() : null;
+    const openAIClient = engineType === 'assistants' ? new OpenAI() : null;
+    const engine = engineType === 'assistants' && openAIClient ?
+        new AssistantsEngine(openAIClient, []) : null;
 
-    let messages: any[] = [];
+    console.log(`Starting ${engineType === 'swarm' ? 'Swarm' : 'Assistants'} CLI 🐝`);
+
+    let messages: Message[] = [];
     let currentAgent = startingAgent;
 
     const rl = readline.createInterface({
@@ -104,74 +60,157 @@ async function runDemoLoop(
             rl.question(chalk.gray("User: "), resolve);
         });
 
-        messages.push({ role: "user", content: userInput });
+        if (engineType === 'assistants' && engine && currentAgent) {
+            const taskConfig = {
+                description: userInput,
+                assistant: currentAgent.name,
+                evaluate: false,
+                iterate: false
+            };
+            const task = new Task(taskConfig);
 
-        const response = await client.run(
-            currentAgent,
-            messages,
-            contextVariables,
-            null,
-            stream,
-            debug
-        );
-
-        if (isResponse(response)) {
-            prettyPrintMessages(response.messages);
-            messages.push(...response.messages);
-
-            // Check if the agent has changed
-            if (response.agent.name !== currentAgent.name) {
-                console.log(chalk.yellow(`Agent changed from ${currentAgent.name} to ${response.agent.name}`));
-                currentAgent = response.agent;
-
-                // Add a system message to indicate the agent change
-                messages.push({
-                    role: "system",
-                    content: `Switching to ${currentAgent.name}`
-                });
-
-                // Get an initial response from the new agent
-                const newAgentResponse = await client.run(
-                    currentAgent,
-                    messages,
-                    contextVariables,
-                    null,
-                    stream,
-                    debug
-                );
-
-                if (isResponse(newAgentResponse)) {
-                    prettyPrintMessages(newAgentResponse.messages);
-                    messages.push(...newAgentResponse.messages);
-                }
+            try {
+                const response = await engine.runTask(task, debug);
+                console.log(chalk.blue(`Assistant: ${response}`));
+            } catch (error) {
+                console.error('Error:', error);
             }
+        } else if (swarmClient && isAgent(currentAgent)) {
+            const userMessage: Message = {
+                role: 'user',
+                content: userInput
+            };
+            messages.push(userMessage);
 
-            contextVariables = { ...contextVariables, ...response.context_variables };
-        } else {
-            console.error("Unexpected response type");
+            const chatMessages = messages.map(convertToChatMessage);
+
+            const response = await swarmClient.run(
+                currentAgent,
+                chatMessages,
+                contextVariables,
+                null,
+                stream,
+                debug
+            );
+
+            if (isSwarmResponse(response)) {
+                const swarmMessages = response.messages.map(convertFromChatMessage);
+                prettyPrintMessages(swarmMessages);
+                messages = [...messages, ...swarmMessages];
+
+                if (response.agent.name !== currentAgent.name) {
+                    console.log(chalk.yellow(`Agent changed from ${currentAgent.name} to ${response.agent.name}`));
+                    currentAgent = response.agent;
+
+                    const systemMessage: Message = {
+                        role: 'system',
+                        content: `Switching to ${currentAgent.name}`
+                    };
+                    messages.push(systemMessage);
+
+                    if (isAgent(currentAgent)) {
+                        const newAgentResponse = await swarmClient.run(
+                            currentAgent,
+                            messages.map(convertToChatMessage),
+                            contextVariables,
+                            null,
+                            stream,
+                            debug
+                        );
+
+                        if (isSwarmResponse(newAgentResponse)) {
+                            const newMessages = newAgentResponse.messages.map(convertFromChatMessage);
+                            prettyPrintMessages(newMessages);
+                            messages = [...messages, ...newMessages];
+                        }
+                    }
+                }
+
+                contextVariables = { ...contextVariables, ...response.context_variables };
+            }
         }
 
-        // Print the current agent's name after each interaction
         console.log(chalk.yellow(`Current Agent: ${currentAgent.name}`));
     }
 }
 
-/**
- * Type guard to check if an object is a Response.
- * @param obj - The object to check.
- * @returns True if the object is a Response, false otherwise.
- */
-function isResponse(obj: any): obj is Response {
-    return obj !== null && typeof obj === 'object' && 'messages' in obj && 'agent' in obj && Array.isArray(obj.messages);
+interface SwarmResponse extends Omit<Response<unknown>, 'messages'> {
+    messages: Message[];
+    agent: Agent;
+    context_variables: ContextVariables;
 }
 
-/**
- * Type guard to check if an object is an AsyncIterable.
- * @param obj - The object to check.
- * @returns True if the object is an AsyncIterable, false otherwise.
- */
-function isAsyncIterable(obj: any): obj is AsyncIterable<any> {
-    return obj !== null && typeof obj === 'object' && Symbol.asyncIterator in obj;
+function isValidMessage(obj: unknown): obj is Message {
+    const message = obj as Record<string, unknown>;
+
+    const hasValidRole = typeof message?.role === 'string' &&
+        ['system', 'user', 'assistant', 'function', 'tool'].includes(message.role);
+
+    const hasValidContent = typeof message?.content === 'string';
+
+    const hasValidOptionals = (
+        message?.sender === undefined || typeof message.sender === 'string'
+    ) && (
+            message?.task_id === undefined || typeof message.task_id === 'string'
+        ) && (
+            message?.refusal === undefined ||
+            message?.refusal === null ||
+            typeof message.refusal === 'string'
+        );
+
+    const hasValidTool = message?.tool === undefined || (
+        typeof message.tool === 'object' &&
+        message.tool !== null &&
+        typeof (message.tool as Record<string, unknown>).tool === 'string' &&
+        typeof (message.tool as Record<string, unknown>).args === 'object' &&
+        (message.tool as Record<string, unknown>).args !== null
+    );
+
+    return !!message && hasValidRole && hasValidContent && hasValidOptionals && hasValidTool;
+}
+
+function isValidAgent(obj: unknown): obj is Agent {
+    const agent = obj as Record<string, unknown>;
+
+    const hasValidBasics = typeof agent?.name === 'string' &&
+        typeof agent?.model === 'string';
+
+    const hasValidInstructions = typeof agent?.instructions === 'string' ||
+        typeof agent?.instructions === 'function';
+
+    const hasValidFunctions = Array.isArray(agent?.functions) &&
+        agent.functions.every(f =>
+            typeof f === 'object' &&
+            f !== null &&
+            typeof (f as Record<string, unknown>).name === 'string' &&
+            typeof (f as Record<string, unknown>).function === 'function'
+        );
+
+    return !!agent && hasValidBasics && hasValidInstructions && hasValidFunctions;
+}
+
+function isAgent(value: Agent | Assistant): value is Agent {
+    return !(value instanceof Assistant) && isValidAgent(value);
+}
+
+function isSwarmResponse(obj: unknown): obj is SwarmResponse {
+    const response = obj as Record<string, unknown>;
+
+    if (!response || typeof response !== 'object') {
+        return false;
+    }
+
+    const hasValidMessages = Array.isArray(response.messages) &&
+        response.messages.every(isValidMessage);
+
+    const hasValidAgent = response.agent !== undefined &&
+        isValidAgent(response.agent);
+
+    const hasValidContextVars = response.context_variables !== undefined &&
+        typeof response.context_variables === 'object' &&
+        response.context_variables !== null;
+
+    return hasValidMessages && hasValidAgent && hasValidContextVars;
 }
 
 export { runDemoLoop };

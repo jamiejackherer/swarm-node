@@ -1,7 +1,6 @@
 export * from './Agent';
+export * from './Tool';
+export * from './SharedTypes';
 export * from './Response';
 export * from './Result';
-export * from './Tool';
-export * from './ToolCall';
-
-export type AgentFunction = (...args: any[]) => Promise<any>;
+export * from './Task';

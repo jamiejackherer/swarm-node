@@ -1,19 +1,20 @@
-import OpenAI from 'openai';
-import { Agent, Response, createResponse, Result, createResult, ToolCall } from './types';
-import { debugPrint, mergeChunk, functionToJson, FunctionJson } from './utils';
-import dotenv from 'dotenv';
-
-dotenv.config();
+/* eslint-disable no-undef */
+import { Agent, Response, createResponse, Result } from '../types';
+import { debugPrint, mergeChunk } from '../utils';
+import { OpenAI } from 'openai';
+import console from 'console';
+import { ExtendedChatCompletionMessage } from '../types/OpenAI';
+import { ContextVariables } from '../types/SharedTypes';
+import fs from 'fs/promises';
+import chalk from 'chalk';
+import { TestCase } from '../types/TestCase';
+import { Assistant } from '../agents/Assistant';
 
 /**
  * The name of the context variables in the function parameters.
  */
 const CTX_VARS_NAME = "context_variables";
 
-/**
- * Type alias for context variables.
- */
-type ContextVariables = Record<string, string>;
 
 /**
  * Retrieves a context variable by key.
@@ -22,37 +23,18 @@ type ContextVariables = Record<string, string>;
  * @returns The value of the context variable, or an empty string if not found.
  */
 function getContextVariable(variables: ContextVariables, key: string): string {
-    return variables[key] || '';
+    const value = variables[key];
+    return typeof value === 'string' ? value : '';
 }
 
-/**
- * Extended type for ChatCompletionMessage to include sender and additional properties.
- */
-type ExtendedChatCompletionMessage = OpenAI.ChatCompletionMessage & {
-    sender?: string;
-    tool_calls?: OpenAI.ChatCompletionMessageToolCall[];
-    refusal: string | null;
-};
 
-/**
- * Extended type for ChatCompletionChunk delta to include sender.
- */
-type ExtendedDelta = OpenAI.Chat.Completions.ChatCompletionChunk['choices'][0]['delta'] & {
-    sender?: string;
-};
-
-/**
- * Extended type for ChatCompletionCreateParams to include parallel_tool_calls.
- */
-type ExtendedChatCompletionCreateParams = OpenAI.Chat.Completions.ChatCompletionCreateParams & {
-    parallel_tool_calls?: number;
-};
 
 /**
  * The main Swarm class that handles the interaction with OpenAI's API and manages the conversation flow.
  */
 export class Swarm {
     private client: OpenAI;
+    private assistants: Map<string, Assistant> = new Map();
 
     /**
      * Constructs a new Swarm instance.
@@ -72,12 +54,13 @@ export class Swarm {
      * @param contextVariables - The context variables.
      * @returns A promise that resolves to the system message.
      */
-    private async getSystemMessage(agent: Agent, contextVariables: Record<string, any>): Promise<OpenAI.ChatCompletionMessageParam> {
+    private async getSystemMessage(agent: Agent, contextVariables: ContextVariables): Promise<OpenAI.ChatCompletionMessageParam> {
+        const instructions = typeof agent.instructions === 'function'
+            ? await agent.instructions(this.convertToStringRecord(contextVariables))
+            : agent.instructions;
         return {
             role: "system",
-            content: typeof agent.instructions === 'function'
-                ? await agent.instructions(contextVariables)
-                : agent.instructions
+            content: instructions
         };
     }
 
@@ -112,7 +95,10 @@ export class Swarm {
         tools.forEach(tool => {
             const params = tool.function.parameters;
             if (params && typeof params === 'object' && 'properties' in params) {
-                delete (params.properties as Record<string, unknown>)[CTX_VARS_NAME];
+                const properties = params.properties;
+                if (properties && typeof properties === 'object' && CTX_VARS_NAME in properties) {
+                    delete properties[CTX_VARS_NAME];
+                }
                 if (Array.isArray(params.required)) {
                     params.required = params.required.filter((prop: string) => prop !== CTX_VARS_NAME);
                 }
@@ -121,16 +107,16 @@ export class Swarm {
 
         console.log("[DEBUG] Tools being sent to API:", JSON.stringify(tools, null, 2));
 
-        const createParams: ExtendedChatCompletionCreateParams = {
+        const createParams: OpenAI.ChatCompletionCreateParams = {
             model: modelOverride || agent.model,
             messages: [systemMessage, ...messages],
-            stream: stream,
             tools: tools.length > 0 ? tools : undefined,
-            tool_choice: agent.tool_choice || undefined,
+            tool_choice: agent.tool_choice,
+            stream,
         };
 
-        if (tools.length > 0 && agent.parallel_tool_calls) {
-            (createParams as any).parallel_tool_calls = agent.parallel_tool_calls;
+        if (tools.length > 0 && agent.parallel_tool_calls !== undefined) {
+            createParams.parallel_tool_calls = agent.parallel_tool_calls;
         }
 
         return this.client.chat.completions.create(createParams);
@@ -141,7 +127,7 @@ export class Swarm {
      * @param func - The function to convert.
      * @returns A promise that resolves to the JSON representation of the function.
      */
-    private async functionToJsonSimple(func: { name: string, function: Function }): Promise<OpenAI.ChatCompletionCreateParams.Function> {
+    private async functionToJsonSimple(func: { name: string, function: (...args: unknown[]) => unknown }): Promise<OpenAI.ChatCompletionCreateParams.Function> {
         const paramNames = await this.getParamNames(func.function);
         const result: OpenAI.ChatCompletionCreateParams.Function = {
             name: func.name,
@@ -161,7 +147,7 @@ export class Swarm {
      * @param func - The function to get parameter names for.
      * @returns A promise that resolves to an array of parameter names.
      */
-    private async getParamNames(func: Function): Promise<string[]> {
+    private async getParamNames(func: (...args: unknown[]) => unknown): Promise<string[]> {
         const funcStr = func.toString();
         const match = funcStr.match(/\(([^)]*)\)/);
         return match ? match[1].split(',').map(param => param.trim()) : [];
@@ -172,8 +158,8 @@ export class Swarm {
      * @param value - The value to check.
      * @returns A promise that resolves to true if the value is a Result, false otherwise.
      */
-    private async isResult(value: any): Promise<boolean> {
-        return value && typeof value === 'object' && 'value' in value;
+    private async isResult(value: unknown): Promise<boolean> {
+        return value !== null && typeof value === 'object' && 'value' in value;
     }
 
     /**
@@ -181,32 +167,43 @@ export class Swarm {
      * @param value - The value to check.
      * @returns A promise that resolves to true if the value is an Agent, false otherwise.
      */
-    private async isAgent(value: any): Promise<boolean> {
-        const isAgent = value && typeof value === 'object' && 'name' in value && 'functions' in value;
+    private async isAgent(value: unknown): Promise<boolean> {
+        const isAgent = value !== null && typeof value === 'object' && 'name' in value && 'functions' in value;
         console.log(`[DEBUG] isAgent check: ${isAgent}, value:`, value);
         return isAgent;
     }
 
     /**
+     * Checks if a value is a Partial<Agent> object.
+     * @param value - The value to check.
+     * @returns True if the value is a Partial<Agent>, false otherwise.
+     */
+    private isPartialAgent(value: unknown): value is Partial<Agent> {
+        return value !== null && typeof value === 'object' && 'name' in value;
+    }
+
+    /**
      * Handles the result of a function call.
      * @param result - The result to handle.
-     * @param debug - Whether to enable debug mode.
      * @returns A promise that resolves to a Result object.
      */
-    private async handleFunctionResult(result: any, debug: boolean): Promise<Result> {
+    private async handleFunctionResult(result: unknown): Promise<Result> {
         console.log(`[DEBUG] handleFunctionResult input:`, result);
 
-        if (await this.isAgent(result)) {
-            console.log(`[DEBUG] Detected agent in function result: ${result.name}`);
-            return {
-                value: JSON.stringify({ agent: result.name }),
-                agent: result,
-                context_variables: result.context || {}
-            };
+        if (this.isPartialAgent(result)) {
+            const agentResult = result;
+            console.log(`[DEBUG] Detected agent in function result: ${agentResult.name}`);
+            if (this.isValidAgent(agentResult)) {
+                return {
+                    value: JSON.stringify({ agent: agentResult.name }),
+                    agent: agentResult,
+                    context_variables: this.convertToStringRecord(agentResult.context || {})
+                };
+            }
         }
 
         if (await this.isResult(result)) {
-            return result;
+            return result as Result;
         }
 
         return {
@@ -214,6 +211,23 @@ export class Swarm {
             agent: null,
             context_variables: {}
         };
+    }
+
+    private convertToStringRecord(context: Record<string, unknown>): ContextVariables {
+        const result: ContextVariables = {};
+        Object.entries(context).forEach(([key, value]) => {
+            result[key] = String(value);
+        });
+        return result;
+    }
+
+    private isValidAgent(value: Partial<Agent>): value is Agent {
+        return (
+            typeof value.name === 'string' &&
+            Array.isArray(value.functions) &&
+            typeof value.model === 'string' &&
+            (typeof value.instructions === 'string' || typeof value.instructions === 'function')
+        );
     }
 
     /**
@@ -228,7 +242,6 @@ export class Swarm {
         toolCalls: OpenAI.ChatCompletionMessageToolCall[],
         agent: Agent,
         contextVariables: ContextVariables,
-        debug: boolean
     ): Promise<{ messages: OpenAI.ChatCompletionMessageParam[], context_variables: ContextVariables, agent: Agent }> {
         const messages: OpenAI.ChatCompletionMessageParam[] = [];
         let newAgent: Agent | undefined;
@@ -250,7 +263,7 @@ export class Swarm {
             const args = JSON.parse(toolCall.function.arguments || '{}');
             const request = getContextVariable(contextVariables, 'request');
             const rawResult = await func.function({ request, ...args });
-            const result = await this.handleFunctionResult(rawResult, debug);
+            const result = await this.handleFunctionResult(rawResult);
             console.log(`[DEBUG] Function result:`, result);
 
             if (result.agent) {
@@ -284,7 +297,7 @@ export class Swarm {
     async run(
         agent: Agent,
         messages: OpenAI.ChatCompletionMessageParam[],
-        contextVariables: Record<string, any> = {},
+        contextVariables: ContextVariables = {},
         modelOverride: string | null = null,
         stream: boolean = false,
         debug: boolean = false,
@@ -320,7 +333,6 @@ export class Swarm {
                     message.tool_calls,
                     currentAgent,
                     currentContextVariables,
-                    debug
                 );
 
                 currentMessages.push(...toolResponse.messages);
@@ -364,7 +376,7 @@ export class Swarm {
         debug: boolean = false,
         maxTurns: number = Infinity,
         executeTool: boolean = true
-    ): AsyncGenerator<any, void, unknown> {
+    ): AsyncGenerator<OpenAI.Chat.Completions.ChatCompletionChunk['choices'][0]['delta'] | { delim: string } | { response: Response }, void, unknown> {
         let activeAgent = agent;
         let currentContextVariables = { ...contextVariables };
         let currentMessages = [...messages];
@@ -393,8 +405,8 @@ export class Swarm {
                 for await (const chunk of completion) {
                     const delta = chunk.choices[0].delta;
                     if (delta.role === "assistant") {
-                        if ('sender' in delta) {
-                            (delta as ExtendedDelta).sender = activeAgent.name;
+                        if ('sender' in delta && typeof delta.sender === 'string') {
+                            delta.sender = activeAgent.name;
                         }
                     }
                     yield delta;
@@ -404,7 +416,8 @@ export class Swarm {
                 const responseMessage = completion.choices[0].message;
                 Object.assign(message, responseMessage);
                 message.sender = activeAgent.name;
-                yield completion.choices[0];
+                // Change this line:
+                yield { content: responseMessage.content, role: responseMessage.role };
             }
             yield { delim: "end" };
 
@@ -423,7 +436,6 @@ export class Swarm {
                 message.tool_calls,
                 activeAgent,
                 currentContextVariables,
-                debug
             );
 
             currentMessages.push(...partialResponse.messages);
@@ -450,6 +462,71 @@ export class Swarm {
     private isStreamingCompletion(
         completion: OpenAI.Chat.Completions.ChatCompletion | AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
     ): completion is AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk> {
-        return Symbol.asyncIterator in completion;
+        return typeof completion === 'object' && completion !== null && Symbol.asyncIterator in completion;
     }
+
+    async runTests(testFilePath: string): Promise<void> {
+        const testCases = await this.loadTestCases(testFilePath);
+        let totalTests = 0;
+        let passedTests = 0;
+
+        for (const testCase of testCases) {
+            totalTests++;
+            const result = await this.runTestCase(testCase);
+            if (result.success) {
+                passedTests++;
+                console.log(chalk.green(`✔ Test passed: ${testCase.description}`));
+            } else {
+                console.log(chalk.red(`✘ Test failed: ${testCase.description}`));
+            }
+        }
+
+        console.log(chalk.cyan(`\nTest Results: ${passedTests}/${totalTests} passed`));
+    }
+
+    private async loadTestCases(filePath: string): Promise<TestCase[]> {
+        const fileContent = await fs.readFile(filePath, 'utf-8');
+        return fileContent.split('\n')
+            .filter(line => line.trim())
+            .map(line => JSON.parse(line) as TestCase);
+    }
+
+    private async runTestCase(testCase: TestCase): Promise<{
+        success: boolean,
+        message: string
+    }> {
+        const assistant = await this.findAssistant(testCase.expected_assistant);
+        if (!assistant) {
+            return {
+                success: false,
+                message: `Assistant ${testCase.expected_assistant} not found`
+            };
+        }
+
+        await this.run(
+            assistant,
+            [{ role: 'user', content: testCase.description }],
+            {},
+            null,
+            false,
+            true
+        );
+
+        return assistant.evaluateTask(testCase);
+    }
+
+    private async findAssistant(name: string): Promise<Assistant | null> {
+        // Find assistant by name from the assistants map
+        return this.assistants.get(name) || null;
+    }
+
+    // Add method to register assistants
+    registerAssistant(assistant: Assistant): void {
+        this.assistants.set(assistant.name, assistant);
+    }
+
 }
+
+
+
+

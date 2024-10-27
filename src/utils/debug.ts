@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import console from 'console';
 
 /**
  * Debug print function using Chalk for colored output.

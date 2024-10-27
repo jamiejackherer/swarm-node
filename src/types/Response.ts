@@ -1,17 +1,17 @@
 import { Agent } from './Agent';
 import { OpenAI } from 'openai';
 
-export interface Response {
+export interface Response<T = unknown> {
     messages: (OpenAI.ChatCompletionMessageParam | OpenAI.ChatCompletionMessage)[];
     agent: Agent;
-    context_variables: Record<string, any>;
+    context_variables: Record<string, T>;
 }
 
-export const createResponse = (
+export const createResponse = <T = unknown>(
     messages: (OpenAI.ChatCompletionMessageParam | OpenAI.ChatCompletionMessage)[],
     agent: Agent,
-    context_variables: Record<string, any>
-): Response => ({
+    context_variables: Record<string, T> = {}
+): Response<T> => ({
     messages,
     agent,
     context_variables,

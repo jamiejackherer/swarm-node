@@ -17,6 +17,12 @@ function completeRefundAndTransferBack(): Promise<Agent> {
     return Promise.resolve(triageAgent);
 }
 
+function completeSaleAndTransferBack(): Promise<Agent> {
+    console.log("[mock] Completing sale and transferring back to Triage Agent");
+    return Promise.resolve(triageAgent);
+}
+
+
 function checkInventory(): Promise<string> {
     console.log("[mock] Checking inventory...");
     return Promise.resolve("Inventory checked");
@@ -150,19 +156,20 @@ function transferToRefunds(context: { request: string }): Promise<Agent> {
 
 // Assign functions to agents
 triageAgent.functions = [
-    { name: "transferToSales", function: (context) => transferToSales({ request: context.request }) },
-    { name: "transferToRefunds", function: (context) => transferToRefunds({ request: context.request }) }
+    { name: "transferToSales", function: (context: { request: string }) => transferToSales({ request: context.request }) },
+    { name: "transferToRefunds", function: (context: { request: string }) => transferToRefunds({ request: context.request }) }
 ];
 
 salesAgent.functions.push(
-    { name: "transferBackToTriage", function: (context) => transferBackToTriage({ request: context.request }) },
+    { name: "transferBackToTriage", function: (context: { request: string }) => transferBackToTriage({ request: context.request }) },
+    { name: "completeSaleAndTransferBack", function: completeSaleAndTransferBack },
     { name: "checkInventory", function: checkInventory },
     { name: "processSale", function: processSale } // New function to process sales
 );
 
 refundsAgent.functions.push(
-    { name: "transferBackToTriage", function: (context) => transferBackToTriage({ request: context.request }) },
+    { name: "transferBackToTriage", function: (context: { request: string }) => transferBackToTriage({ request: context.request }) },
     { name: "completeRefundAndTransferBack", function: completeRefundAndTransferBack },
-    { name: "transferToSales", function: (context) => transferToSales({ request: context.request }) }
+    { name: "transferToSales", function: (context: { request: string }) => transferToSales({ request: context.request }) }
 );
 

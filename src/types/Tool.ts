@@ -17,7 +17,6 @@ export interface FunctionTool {
 }
 
 export interface Tool {
-    type: string;
-    function?: FunctionTool;
-    humanInput?: boolean;
+    name: string;
+    function: (...args: unknown[]) => Promise<unknown>;
 }

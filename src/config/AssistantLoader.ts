@@ -1,5 +1,5 @@
 import fs from 'fs/promises';
-import { Assistant } from '../Assistant';
+import { Assistant } from '../agents/Assistant';
 import { Tool } from '../types/Tool';
 
 export async function loadAssistantConfig(path: string): Promise<Assistant> {
