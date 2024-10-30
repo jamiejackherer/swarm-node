@@ -1,0 +1,17 @@
+[
+    {
+        "title": "Refund Policy",
+        "text": "We offer a 30-day money-back guarantee on all our products. Refunds are processed within 5-7 business days of approval. Enterprise contracts have custom refund terms.",
+        "url": "https://docs.example.com/refund-policy"
+    },
+    {
+        "title": "How to Request a Refund",
+        "text": "To request a refund, log into your account and navigate to Billing > Request Refund. Provide the reason for your refund request and any relevant details. Our team will review your request within 24 hours.",
+        "url": "https://docs.example.com/request-refund"
+    },
+    {
+        "title": "Refund Processing Time",
+        "text": "Standard refunds are processed within 5-7 business days. The time to see the refund in your account may vary depending on your payment method and financial institution.",
+        "url": "https://docs.example.com/refund-processing"
+    }
+]

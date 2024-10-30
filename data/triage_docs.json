@@ -1,0 +1,17 @@
+[
+    {
+        "title": "Welcome to Our Services",
+        "text": "We offer a comprehensive suite of AI-powered solutions including chatbots, sales automation, and customer support. Our platform helps businesses streamline their operations and improve customer satisfaction.",
+        "url": "https://docs.example.com/welcome"
+    },
+    {
+        "title": "Getting Started",
+        "text": "To get started with our services, you'll need to create an account and choose a plan. For sales inquiries, our sales team can help you select the right package. For existing customers, we offer dedicated support and refund assistance if needed.",
+        "url": "https://docs.example.com/getting-started"
+    },
+    {
+        "title": "Service Overview",
+        "text": "Our services are divided into three main areas: Product Sales, Customer Support, and Refund Processing. Each area has dedicated specialists to assist you with your specific needs.",
+        "url": "https://docs.example.com/overview"
+    }
+]

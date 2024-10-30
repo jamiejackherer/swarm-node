@@ -38,12 +38,13 @@ async function runDemoLoop(
     contextVariables: ContextVariables = {},
     stream: boolean = false,
     debug: boolean = false,
-    engineType: 'swarm' | 'assistants' = 'swarm'
+    engineType: 'swarm' | 'assistants' = 'swarm',
+    existingEngine?: AssistantsEngine
 ): Promise<void> {
     const swarmClient = engineType === 'swarm' ? new Swarm() : null;
-    const openAIClient = engineType === 'assistants' ? new OpenAI() : null;
-    const engine = engineType === 'assistants' && openAIClient ?
-        new AssistantsEngine(openAIClient, []) : null;
+    const openAIClient = engineType === 'assistants' && !existingEngine ? new OpenAI() : null;
+    const engine = existingEngine || (engineType === 'assistants' && openAIClient ?
+        new AssistantsEngine(openAIClient, []) : null);
 
     console.log(`Starting ${engineType === 'swarm' ? 'Swarm' : 'Assistants'} CLI 🐝`);
 

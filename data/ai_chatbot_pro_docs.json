@@ -1,0 +1,27 @@
+[
+    {
+        "title": "Introduction to AI Chatbot Pro",
+        "text": "AI Chatbot Pro is a cutting-edge conversational AI platform designed to enhance customer interactions. It offers seamless integration with various communication channels.",
+        "url": "https://docs.aichatbotpro.com/introduction"
+    },
+    {
+        "title": "Setting Up Your AI Chatbot",
+        "text": "Learn how to set up your AI Chatbot Pro account, configure your chatbot, and integrate it with your existing systems.",
+        "url": "https://docs.aichatbotpro.com/setup"
+    },
+    {
+        "title": "Customizing Chatbot Responses",
+        "text": "This guide explains how to customize the responses of your AI Chatbot Pro to better suit your business needs and improve user engagement.",
+        "url": "https://docs.aichatbotpro.com/customizing-responses"
+    },
+    {
+        "title": "AI Chatbot Pro Pricing",
+        "text": "Explore the pricing plans for AI Chatbot Pro, including details on features and limitations of each plan.",
+        "url": "https://docs.aichatbotpro.com/pricing"
+    },
+    {
+        "title": "Best Practices for AI Chatbot Pro",
+        "text": "Discover best practices for deploying and managing AI Chatbot Pro to maximize its effectiveness and ensure a smooth user experience.",
+        "url": "https://docs.aichatbotpro.com/best-practices"
+    }
+]

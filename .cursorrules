@@ -1,0 +1,81 @@
+# TypeScript Coding Guidelines for My Project
+
+## Core Principles
+
+- **Use TypeScript Strict Mode**: Always use strict mode to catch potential issues early. Avoid using `any` at all costs.
+- **Type Annotations**: Ensure every variable, parameter, and return value has a proper type annotation. If a type does not exist, create it.
+- **File Structure**: Maintain a clean, modular file structure. Create individual files for types, utility functions, and other reusable pieces of code.
+- **Plan Before Coding**: Always plan before coding. Avoid writing code without analyzing the impact it may have on the rest of the codebase.
+- **Full Coverage**: If a function references a non-existent function, you must create it as part of the update.
+- **Error-Free Refactoring**: When fixing errors, ensure that no new errors are introduced. Take time to examine the full context before making changes.
+- **Impact Awareness**: Always assess whether the changes you're about to make will break other parts of the system.
+
+## Nomenclature
+
+- **Variables and Functions**: Use `camelCase` for variable and function names.
+- **Classes**: Use `PascalCase` for class names.
+- **Files and Directories**: Use `kebab-case` for file and directory names.
+- **Constants**: Use `UPPERCASE` for environment variables and constants.
+- **Naming Rules**:
+  - Always use descriptive, complete words instead of abbreviations.
+  - Use verbs for boolean variable names: `isAuthenticated`, `hasErrors`, etc.
+  - Functions should be named using a verb followed by a noun to indicate the action and the subject, e.g., `getUserData`.
+
+## Code Modularity and Separation
+
+- **Single Responsibility**: Functions, classes, and modules should follow the Single Responsibility Principle (SRP). Each piece of code should have one clear purpose.
+- **File Separation**: Use separate files for utilities, types, and interfaces. Every type and interface must be created in a separate file where necessary.
+- **Avoid Code Duplication**: Use utility functions, reusable types, or abstract classes/interfaces to avoid duplication.
+  
+## Typescript-Specific Practices
+
+- **Avoid any**: Do not use `any`. Use custom types/interfaces or TypeScript utility types (`Partial<T>`, `Record<K, V>`, etc.).
+- **Strict Null Checks**: Handle `null` and `undefined` explicitly in types.
+- **Readonly and Immutability**: Use `readonly` for data that should not change. Favor immutability wherever possible.
+
+## Function Guidelines
+
+- **Short Functions**: Keep functions short (ideally < 20 lines) and focused. Extract logic into smaller functions where possible.
+- **Function Parameters**: Pass multiple arguments as objects for flexibility (`RO-RO`: receive object-return object).
+- **Default Parameters**: Use default values instead of null/undefined checks within functions.
+- **Error Handling**: Return early when errors are encountered to avoid deep nesting. Use exceptions only for unexpected errors.
+
+## Object-Oriented Principles
+
+- **SOLID Principles**: Follow SOLID design principles—especially single responsibility and dependency inversion. 
+- **Composition Over Inheritance**: Favor composition (using interfaces and types) instead of class inheritance.
+- **Service Design**: Write services with clear boundaries and small, maintainable methods. Services should have a well-defined public API.
+
+## API Design
+
+- **REST/GraphQL**: Follow REST or GraphQL conventions.
+  - Use HTTP status codes appropriately.
+  - Design routes or queries that reflect the underlying business actions.
+- **Error Handling**: Global exception filters for handling application-wide errors.
+  - Use guards, pipes, and interceptors where appropriate for request management.
+
+## Asynchronous Programming
+
+- **Promise Handling**: Always handle promises with `try-catch` or `.catch()` to avoid unhandled rejections.
+- **Async/Await**: Use async/await for all asynchronous code. Ensure functions are properly marked as `async` if they return a promise.
+
+## OpenAI Node API and Qdrant Integration
+
+- **API Design**: When working with OpenAI and Qdrant, create typed service classes responsible for communicating with their APIs. Ensure proper typing for the responses.
+- **Qdrant Collections**: Structure and type your collections appropriately in Qdrant. Define proper schemas for data stored and fetched.
+
+## Testing
+
+- **Unit Testing**: Write unit tests for each service and function. Use Jest as the standard test framework.
+- **E2E Tests**: For each module (controller + service), write end-to-end tests covering major flows.
+- **Test Coverage**: Aim for 100% code coverage across modules. Test edge cases for all types of functions (positive, negative, edge).
+
+## Error Handling
+
+- **Exceptions**: Throw exceptions for unexpected errors. Use global error handling for catching application-wide errors.
+- **Logging**: Implement logging for exceptions and ensure they provide helpful context.
+
+## Final Notes
+
+- **Quality Over Speed**: Focus on producing high-quality, clean code. Never rush, especially when refactoring or handling critical parts of the system.
+- **Peer Review**: If working with others, ensure your code is well-documented and easy to follow.

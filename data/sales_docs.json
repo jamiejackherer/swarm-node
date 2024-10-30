@@ -1,0 +1,17 @@
+[
+    {
+        "title": "Product Pricing",
+        "text": "Our products are available in three tiers: Basic ($99/month), Professional ($199/month), and Enterprise (custom pricing). Each tier includes different features and support levels.",
+        "url": "https://docs.example.com/pricing"
+    },
+    {
+        "title": "Enterprise Solutions",
+        "text": "Our Enterprise solutions offer custom integrations, dedicated support, and unlimited usage. Perfect for large organizations needing scalable solutions.",
+        "url": "https://docs.example.com/enterprise"
+    },
+    {
+        "title": "Volume Discounts",
+        "text": "We offer significant discounts for annual commitments and volume licenses. Contact our sales team to discuss your specific needs and get a customized quote.",
+        "url": "https://docs.example.com/volume-pricing"
+    }
+]

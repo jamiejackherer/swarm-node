@@ -17,6 +17,7 @@ export interface FunctionTool {
 }
 
 export interface Tool {
-    name: string;
+    name: string;  // Make name required instead of optional
     function: (...args: unknown[]) => Promise<unknown>;
+    schema?: unknown;
 }

@@ -11,10 +11,23 @@ import { format } from '../utils/string';
 import console from 'console';
 import { Tool } from '../types/Tool';
 import { setTimeout } from 'timers';
+import { triageAssistant, salesAssistant, refundsAssistant } from '../../examples/assistants-demo/assistants';
+import { isAssistant } from '../types/Assistant';  // Add this import
+import { isTransferResponse } from '../types/Transfer';
 
 // Define proper types for OpenAI responses
 type Thread = OpenAI.Beta.Threads.Thread;
 type Message = OpenAI.Beta.Threads.Messages.Message;
+
+// Update tool output types to match OpenAI's types
+type ToolCallOutput = {
+    tool_call_id: string;
+    output: string;
+};
+
+type RunSubmitToolOutputs = {
+    tool_outputs: ToolCallOutput[];
+};
 
 export class AssistantsEngine implements Engine {
     private client: OpenAI;
@@ -84,7 +97,7 @@ export class AssistantsEngine implements Engine {
                 const assistantTools: Tool[] = assistantToolsNames
                     .filter((name: string) => name in toolDefs)
                     .map((name: string) => ({
-                        name,  // Add the name property
+                        name: name,  // Ensure name is always provided
                         function: toolDefs[name]
                     }));
 
@@ -110,8 +123,8 @@ export class AssistantsEngine implements Engine {
                     assistantName,
                     assistantTools,
                     { history: [] },
-                    logFlag,
                     {
+                        logFlag: logFlag,
                         instance: loadedAssistant
                     }
                 );
@@ -123,15 +136,78 @@ export class AssistantsEngine implements Engine {
     }
 
     private async initializeAndDisplayAssistants(): Promise<void> {
-        await this.loadAllAssistants();
+        // Instead of loading from filesystem, use the assistants passed in tasks
+        this.assistants = this.tasks
+            .map(task => {
+                if (typeof task.assistant === 'string') {
+                    switch (task.assistant) {
+                        case 'Triage Assistant':
+                            return triageAssistant;
+                        case 'Sales Assistant':
+                            return salesAssistant;
+                        case 'Refunds Assistant':
+                            return refundsAssistant;
+                        default:
+                            return null;
+                    }
+                }
+                return null;
+            })
+            .filter(isAssistant);  // Use the type guard instead of inline type predicate
 
+        // Create OpenAI assistants if they don't exist
         for (const asst of this.assistants) {
             console.log(`\n${chalk.magenta('Initializing assistant:')}`);
             console.log(`${chalk.blue('Assistant name:')} ${chalk.bold(asst.name)}`);
 
-            const instance = asst.getInstance();
-            if (instance?.tools) {
-                console.log(`${chalk.green('Tools:')} ${JSON.stringify(instance.tools)} \n`);
+            // Check if assistant already exists
+            const existingAssistants = await this.client.beta.assistants.list();
+            let assistantInstance = existingAssistants.data.find(a => a.name === asst.name);
+
+            if (!assistantInstance) {
+                console.log(`Creating new assistant: ${asst.name}`);
+
+                // Handle instructions that could be a string or function
+                let instructions: string;
+                if (typeof asst.instructions === 'function') {
+                    instructions = await asst.instructions({});
+                } else {
+                    instructions = asst.instructions;
+                }
+
+                assistantInstance = await this.client.beta.assistants.create({
+                    name: asst.name,
+                    instructions,
+                    tools: asst.tools.map(tool => ({
+                        type: "function" as const,
+                        function: {
+                            name: tool.name,
+                            description: "Function to query documentation",
+                            parameters: {
+                                type: "object",
+                                properties: {
+                                    query: {
+                                        type: "string",
+                                        description: "The search query"
+                                    },
+                                    collection: {
+                                        type: "string",
+                                        description: "The collection to search in"
+                                    }
+                                },
+                                required: ["query"]
+                            }
+                        }
+                    })),
+                    model: "gpt-4-1106-preview"
+                });
+            }
+
+            // Always update the instance, whether it's new or existing
+            asst.updateOptions({ instance: assistantInstance });
+
+            if (assistantInstance?.tools) {
+                console.log(`${chalk.green('Tools:')} ${JSON.stringify(assistantInstance.tools)} \n`);
             } else {
                 console.log(`${chalk.green('Tools:')} Not available \n`);
             }
@@ -177,19 +253,94 @@ export class AssistantsEngine implements Engine {
                 throw new Error('Assistant instance or ID not found');
             }
 
+            console.log("Creating message with content:", request);
             await this.client.beta.threads.messages.create(this.thread.id, {
-                role: 'user',
+                role: "user",
                 content: request
             });
 
+            console.log("Creating run for assistant:", assistantInstance.id);
             const run = await this.client.beta.threads.runs.create(this.thread.id, {
-                assistant_id: assistantInstance.id
+                assistant_id: assistantInstance.id,
+                tools: [{
+                    type: "function" as const,
+                    function: {
+                        name: "query_docs",
+                        description: "Function to query documentation",
+                        parameters: {
+                            type: "object",
+                            properties: {
+                                query: {
+                                    type: "string",
+                                    description: "The search query"
+                                },
+                                collection: {
+                                    type: "string",
+                                    description: "The collection to search in"
+                                }
+                            },
+                            required: ["query"]
+                        }
+                    }
+                }]
             });
 
             let runStatus = await this.client.beta.threads.runs.retrieve(this.thread.id, run.id);
-            while (runStatus.status === 'queued' || runStatus.status === 'in_progress') {
+            console.log("Initial run status:", runStatus.status);
+
+            while (runStatus.status === 'queued' || runStatus.status === 'in_progress' || runStatus.status === 'requires_action') {
+                if (runStatus.status === 'requires_action') {
+                    const toolCalls = runStatus.required_action?.submit_tool_outputs.tool_calls;
+                    console.log("Tool calls received:", toolCalls);
+
+                    if (toolCalls) {
+                        const toolOutputPromises = toolCalls.map(async toolCall => {
+                            console.log("Processing tool call:", toolCall.function.name, toolCall.function.arguments);
+
+                            const tool = assistant.tools.find(t => t.name === toolCall.function.name) ||
+                                assistant.functions.find(f => f.name === toolCall.function.name);
+
+                            if (tool) {
+                                const args = JSON.parse(toolCall.function.arguments);
+                                const result = await tool.function(args);
+
+                                if (isTransferResponse(result)) {
+                                    const targetAssistant = this.assistants.find(a => a.name === result.assistant);
+                                    if (targetAssistant) {
+                                        await this.resetThread();
+                                        return this.runRequest(result.context.request, targetAssistant, testMode);
+                                    }
+                                }
+
+                                return {
+                                    tool_call_id: toolCall.id,
+                                    output: JSON.stringify(result)
+                                } as const;
+                            }
+
+                            return {
+                                tool_call_id: toolCall.id,
+                                output: JSON.stringify({ error: 'Unknown tool' })
+                            } as const;
+                        });
+
+                        const toolOutputs = await Promise.all(toolOutputPromises) as ToolCallOutput[];
+
+                        const submitParams: RunSubmitToolOutputs = {
+                            tool_outputs: toolOutputs
+                        };
+
+                        await this.client.beta.threads.runs.submitToolOutputs(
+                            this.thread.id,
+                            run.id,
+                            submitParams
+                        );
+                    }
+                }
+
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 runStatus = await this.client.beta.threads.runs.retrieve(this.thread.id, run.id);
+                console.log("Updated run status:", runStatus.status);
             }
 
             const messages = await this.client.beta.threads.messages.list(this.thread.id);
@@ -197,15 +348,25 @@ export class AssistantsEngine implements Engine {
             const content = lastMessage.content[0];
 
             if ('text' in content) {
-                if (!testMode) {
-                    await this.saveConversation(messages.data, `logs/session_${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+                const response = content.text.value;
+
+                // Check for routing commands
+                if (response.startsWith('ROUTE_TO:')) {
+                    const targetAssistant = this.assistants.find(a =>
+                        a.name === response.replace('ROUTE_TO:', '').trim()
+                    );
+                    if (targetAssistant) {
+                        console.log(`\nRouting to ${targetAssistant.name}...`);
+                        return this.runRequest(request, targetAssistant, testMode);
+                    }
                 }
-                return content.text.value;
+
+                return response;
             }
             return null;
         } catch (error) {
             console.error('Error in runRequest:', error);
-            return null;
+            throw error;
         }
     }
 
@@ -353,5 +514,40 @@ export class AssistantsEngine implements Engine {
             });
             this.tasks.push(task);
         }
+    }
+
+    private async createAssistant(assistant: Assistant): Promise<OpenAI.Beta.Assistant> {
+        const openAIAssistant = await this.client.beta.assistants.create({
+            name: assistant.name,
+            instructions: assistant.instructions.toString(),
+            tools: assistant.tools.map(tool => ({
+                type: "function" as const,
+                function: {
+                    name: tool.name,
+                    description: "Function to query documentation",
+                    parameters: {
+                        type: "object",
+                        properties: {
+                            query: {
+                                type: "string",
+                                description: "The search query"
+                            },
+                            collection: {
+                                type: "string",
+                                description: "The collection to search in"
+                            }
+                        },
+                        required: ["query"]
+                    }
+                }
+            })),
+            model: assistant.model || "gpt-4-1106-preview"  // Add default model
+        });
+
+        assistant.updateOptions({
+            instance: openAIAssistant
+        });
+
+        return openAIAssistant;
     }
 }

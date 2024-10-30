@@ -8,6 +8,7 @@ import chalk from 'chalk';
 import console from 'console';
 import { Conversation } from '../core/Conversation';
 import { Message } from '../types/Message';
+import { AssistantOptions } from '../types/Assistant';
 
 export class Assistant implements Agent {
     // Public properties required by Agent interface
@@ -35,24 +36,15 @@ export class Assistant implements Agent {
         name: string,
         public readonly tools: Tool[],
         context: { history: Message[] } = { history: [] },
-        logFlag: boolean = false,
-        options: {
-            instructions?: string | ((context: Record<string, string>) => Promise<string>);
-            model?: string;
-            tool_choice?: "none" | "auto" | { type: "function"; function: { name: string } };
-            parallel_tool_calls?: boolean;
-            context?: { history: Message[] };
-            logFlag?: boolean;
-            instance?: OpenAI.Beta.Assistant;
-        } = {}
+        options: AssistantOptions = {}
     ) {
         this.name = name;
-        this.log_flag = logFlag || options.logFlag || false;
+        this.log_flag = options.logFlag || false;
         this.conversation = new Conversation();
         this.context = context;
 
         // Initialize required Agent properties
-        this.instructions = options.instructions || "You are a helpful assistant.";
+        this.instructions = context.history.find(msg => msg.role === 'system')?.content || "You are a helpful assistant.";
         this.model = options.model || "gpt-4";
         this.functions = tools.map(tool => ({
             name: tool.name,
@@ -61,6 +53,19 @@ export class Assistant implements Agent {
         this.tool_choice = options.tool_choice || "auto";
         this.parallel_tool_calls = options.parallel_tool_calls || false;
         this.instance = options.instance;
+    }
+
+    public updateOptions(options: AssistantOptions): void {
+        if (options.instance) {
+            this.instance = options.instance;
+        }
+        if (options.logFlag !== undefined) {
+            this.log_flag = options.logFlag;
+        }
+        if (options.instructions) this.instructions = options.instructions;
+        if (options.model) this.model = options.model;
+        if (options.tool_choice) this.tool_choice = options.tool_choice;
+        if (options.parallel_tool_calls !== undefined) this.parallel_tool_calls = options.parallel_tool_calls;
     }
 
     getInstance(): OpenAI.Beta.Assistant | undefined {

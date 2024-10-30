@@ -1,98 +1,81 @@
 // Import URL for ESM
 import { Assistant } from '../../src/agents/Assistant';
 import { Tool } from '../../src/types/Tool';
-import { Message } from '../../src/types/Message';
+import { queryDocs } from '../../src/tools/queryDocs';
+import { QueryParamsSchema } from '../../src/types/QueryParams';
 import console from 'console';
+import { TransferResponse } from '../../src/types/Transfer';
 
-// Mock functions with proper typing for Tool interface
-const processRefund: Tool['function'] = async (...args: unknown[]) => {
-    const itemId = String(args[0] || '');
-    const reason = String(args[1] || 'NOT SPECIFIED');
-    console.log(`[mock] Refunding item ${itemId} because ${reason}...`);
-    return "Success!";
-};
+function isQueryParams(obj: unknown): obj is QueryParamsSchema {
+    if (typeof obj !== 'object' || obj === null) return false;
 
-const applyDiscount: Tool['function'] = async () => {
-    console.log("[mock] Applying discount...");
-    return "Applied discount of 11%";
-};
+    const params = obj as Record<string, unknown>;
 
-const checkInventory: Tool['function'] = async () => {
-    console.log("[mock] Checking inventory...");
-    return "Inventory checked";
-};
+    // Check required properties
+    if (!('query' in params)) return false;
+    if (typeof params.query !== 'string') return false;
 
-const processSale: Tool['function'] = async (...args: unknown[]) => {
-    const itemId = String(args[0] || '');
-    const quantity = Number(args[1] || 1);
-    console.log(`[mock] Processing sale for ${quantity} of item ${itemId}...`);
-    return `Sale processed for ${quantity} of item ${itemId}`;
-};
+    // Check optional properties
+    if ('collection' in params && typeof params.collection !== 'string') return false;
 
+    return true;
+}
 // Define tools with proper typing
 const triageTools: Tool[] = [
     {
-        name: "transferToSales",
-        function: async (...args: unknown[]) => {
-            const request = String(args[0] || '');
-            console.log("[mock] Transferring to Sales Assistant with request:", request);
-            return salesAssistant;
-        }
-    },
-    {
-        name: "transferToRefunds",
-        function: async (...args: unknown[]) => {
-            const request = String(args[0] || '');
-            console.log("[mock] Transferring to Refunds Assistant with request:", request);
-            return refundsAssistant;
+        name: "query_docs",
+        function: async (...args: unknown[]): Promise<unknown> => {
+            const params = args[0];
+            if (!isQueryParams(params)) {
+                return { response: 'Invalid query parameters.' };
+            }
+            return queryDocs.function({ ...params, collection: 'triage' });  // Remove extra array
         }
     }
 ];
 
 const salesTools: Tool[] = [
     {
-        name: "checkInventory",
-        function: checkInventory
-    },
-    {
-        name: "processSale",
-        function: processSale
+        name: "query_docs",
+        function: async (...args: unknown[]): Promise<unknown> => {
+            const params = args[0];
+            if (!isQueryParams(params)) {
+                return { response: 'Invalid query parameters.' };
+            }
+            return queryDocs.function({ ...params, collection: 'sales' });   // Remove extra array
+        }
     }
 ];
 
-const refundTools: Tool[] = [
+const refundsTools: Tool[] = [
     {
-        name: "processRefund",
-        function: processRefund
-    },
-    {
-        name: "applyDiscount",
-        function: applyDiscount
+        name: "query_docs",
+        function: async (...args: unknown[]): Promise<unknown> => {
+            const params = args[0];
+            if (!isQueryParams(params)) {
+                return { response: 'Invalid query parameters.' };
+            }
+            return queryDocs.function({ ...params, collection: 'refunds' }); // Remove extra array
+        }
     }
 ];
 
-// Define message types properly
-const triageMessage: Message = {
-    role: 'system',
-    content: "Determine which assistant is best suited to handle the user's request..."
-};
-
-const salesMessage: Message = {
-    role: 'system',
-    content: "Assist customers with sales and purchase requests..."
-};
-
-const refundsMessage: Message = {
-    role: 'system',
-    content: "Assist customers with refund and return requests..."
-};
-
-// Create assistants with proper typing
+// Define assistants first to avoid circular references
 const triageAssistant = new Assistant(
     "Triage Assistant",
     triageTools,
     {
-        history: [triageMessage]
+        history: [{
+            role: 'system',
+            content: `You are a helpful assistant that specializes in routing user queries to the appropriate department.
+When users ask questions, ALWAYS use the query_docs tool first to find relevant information in our documentation.
+Then, based on the query and documentation:
+1. For questions about pricing, products, making purchases, or when users explicitly request sales → use transferToSales function
+2. For questions about refunds or returns → use transferToRefunds function
+3. For general inquiries → handle them yourself using the documentation
+
+IMPORTANT: Always use the query_docs tool before responding to ensure you have the latest information.`
+        }]
     }
 );
 
@@ -100,17 +83,120 @@ const salesAssistant = new Assistant(
     "Sales Assistant",
     salesTools,
     {
-        history: [salesMessage]
+        history: [{
+            role: 'system',
+            content: `You are a sales assistant that helps users with purchasing products.
+ALWAYS use the query_docs tool first to find specific pricing and product information.
+Focus on:
+1. Understanding customer needs
+2. Providing accurate pricing information
+3. Explaining product features and benefits
+4. Helping customers choose the right plan
+
+IMPORTANT: Always use the query_docs tool before responding to ensure you have the latest product information.`
+        }]
     }
 );
 
 const refundsAssistant = new Assistant(
     "Refunds Assistant",
-    refundTools,
+    refundsTools,
     {
-        history: [refundsMessage]
+        history: [{
+            role: 'system',
+            content: `You are a refunds assistant that helps users with refund requests.
+ALWAYS use the query_docs tool first to find specific refund policy information.
+Focus on:
+1. Explaining refund policies and timeframes
+2. Guiding users through the refund process
+3. Setting correct expectations about processing times
+4. Providing accurate policy information
+
+IMPORTANT: Always use the query_docs tool before responding to ensure you have the latest refund information.`
+        }]
     }
 );
 
-// Export the assistants
+// Then define transfer functions with proper signatures
+const transferFunctions: Record<string, Tool> = {
+    transferToSales: {
+        name: "transferToSales",
+        function: async (...args: unknown[]): Promise<TransferResponse> => {
+            const request = typeof args[0] === 'string' ? args[0] : '';
+            console.log("[mock] Transferring to Sales Assistant with request:", request);
+
+            return {
+                action: 'transfer',
+                assistant: "Sales Assistant",
+                context: {
+                    request,
+                    history: [{ role: 'user', content: request }]
+                }
+            };
+        }
+    },
+    transferToRefunds: {
+        name: "transferToRefunds",
+        function: async (...args: unknown[]): Promise<TransferResponse> => {
+            const request = typeof args[0] === 'string' ? args[0] : '';
+            console.log("[mock] Transferring to Refunds Assistant with request:", request);
+
+            return {
+                action: 'transfer',
+                assistant: "Refunds Assistant",
+                context: {
+                    request,
+                    history: [{ role: 'user', content: request }]
+                }
+            };
+        }
+    },
+    transferBackToTriage: {
+        name: "transferBackToTriage",
+        function: async (...args: unknown[]): Promise<TransferResponse> => {
+            const request = typeof args[0] === 'string' ? args[0] : '';
+            console.log("[mock] Transferring back to Triage Assistant with request:", request);
+
+            return {
+                action: 'transfer',
+                assistant: "Triage Assistant",
+                context: {
+                    request,
+                    history: [{ role: 'user', content: request }]
+                }
+            };
+        }
+    }
+};
+
+// Add transfer functions to assistants
+triageAssistant.functions = [
+    {
+        name: "transferToSales",
+        function: transferFunctions.transferToSales.function
+    },
+    {
+        name: "transferToRefunds",
+        function: transferFunctions.transferToRefunds.function
+    }
+];
+
+salesAssistant.functions = [
+    {
+        name: "transferBackToTriage",
+        function: transferFunctions.transferBackToTriage.function
+    }
+];
+
+refundsAssistant.functions = [
+    {
+        name: "transferBackToTriage",
+        function: transferFunctions.transferBackToTriage.function
+    },
+    {
+        name: "transferToSales",
+        function: transferFunctions.transferToSales.function
+    }
+];
+
 export { triageAssistant, salesAssistant, refundsAssistant };
