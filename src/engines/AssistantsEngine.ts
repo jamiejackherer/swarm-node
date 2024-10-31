@@ -14,6 +14,8 @@ import { setTimeout } from 'timers';
 import { triageAssistant, salesAssistant, refundsAssistant } from '../../examples/assistants-demo/assistants';
 import { isAssistant } from '../types/Assistant';  // Add this import
 import { isTransferResponse } from '../types/Transfer';
+import { TransferResponse } from '../types/Transfer';
+import { ThreadError, TransferError } from '../types/TransferError';
 
 // Define proper types for OpenAI responses
 type Thread = OpenAI.Beta.Threads.Thread;
@@ -29,11 +31,15 @@ type RunSubmitToolOutputs = {
     tool_outputs: ToolCallOutput[];
 };
 
+type Run = OpenAI.Beta.Threads.Run;
+
 export class AssistantsEngine implements Engine {
     private client: OpenAI;
     private assistants: Assistant[];
     private tasks: Task[];
     private thread!: Thread;
+    private currentTask: Task | null = null;
+    private currentRun: Run | null = null;
 
     constructor(client: OpenAI, tasks: Task[]) {
         this.client = client;
@@ -246,46 +252,29 @@ export class AssistantsEngine implements Engine {
         return selectedAssistant;
     }
 
-    private async runRequest(request: string, assistant: Assistant, testMode: boolean): Promise<unknown> {
+    private async runRequest(input: string, assistant: Assistant, testMode: boolean): Promise<unknown> {
         try {
             const assistantInstance = assistant.getInstance();
             if (!assistantInstance?.id) {
                 throw new Error('Assistant instance or ID not found');
             }
 
-            console.log("Creating message with content:", request);
+            console.log("Creating message with content:", input);
             await this.client.beta.threads.messages.create(this.thread.id, {
                 role: "user",
-                content: request
+                content: input
             });
 
             console.log("Creating run for assistant:", assistantInstance.id);
-            const run = await this.client.beta.threads.runs.create(this.thread.id, {
-                assistant_id: assistantInstance.id,
-                tools: [{
-                    type: "function" as const,
-                    function: {
-                        name: "query_docs",
-                        description: "Function to query documentation",
-                        parameters: {
-                            type: "object",
-                            properties: {
-                                query: {
-                                    type: "string",
-                                    description: "The search query"
-                                },
-                                collection: {
-                                    type: "string",
-                                    description: "The collection to search in"
-                                }
-                            },
-                            required: ["query"]
-                        }
-                    }
-                }]
-            });
+            this.currentRun = await this.client.beta.threads.runs.create(
+                this.thread.id,
+                {
+                    assistant_id: assistantInstance.id,
+                    instructions: assistant.instructions.toString()
+                }
+            );
 
-            let runStatus = await this.client.beta.threads.runs.retrieve(this.thread.id, run.id);
+            let runStatus = this.currentRun;
             console.log("Initial run status:", runStatus.status);
 
             while (runStatus.status === 'queued' || runStatus.status === 'in_progress' || runStatus.status === 'requires_action') {
@@ -332,14 +321,14 @@ export class AssistantsEngine implements Engine {
 
                         await this.client.beta.threads.runs.submitToolOutputs(
                             this.thread.id,
-                            run.id,
+                            this.currentRun.id,
                             submitParams
                         );
                     }
                 }
 
                 await new Promise(resolve => setTimeout(resolve, 1000));
-                runStatus = await this.client.beta.threads.runs.retrieve(this.thread.id, run.id);
+                runStatus = await this.client.beta.threads.runs.retrieve(this.thread.id, this.currentRun.id);
                 console.log("Updated run status:", runStatus.status);
             }
 
@@ -357,7 +346,7 @@ export class AssistantsEngine implements Engine {
                     );
                     if (targetAssistant) {
                         console.log(`\nRouting to ${targetAssistant.name}...`);
-                        return this.runRequest(request, targetAssistant, testMode);
+                        return this.runRequest(input, targetAssistant, testMode);
                     }
                 }
 
@@ -365,6 +354,7 @@ export class AssistantsEngine implements Engine {
             }
             return null;
         } catch (error) {
+            this.currentRun = null; // Reset on error
             console.error('Error in runRequest:', error);
             throw error;
         }
@@ -549,5 +539,65 @@ export class AssistantsEngine implements Engine {
         });
 
         return openAIAssistant;
+    }
+
+    private async handleTransfer(
+        response: TransferResponse,
+        currentThread: Thread,
+        currentRun: Run | null
+    ): Promise<void> {
+        if (!currentThread?.id) {
+            throw new ThreadError('Invalid thread');
+        }
+
+        if (!currentRun?.id) {
+            throw new ThreadError('Invalid run state');
+        }
+
+        // Cancel the current run before switching tasks
+        await this.client.beta.threads.runs.cancel(
+            currentThread.id,
+            currentRun.id
+        );
+
+        const targetTask = this.tasks.find(t => t.assistant === response.assistant);
+        if (!targetTask) {
+            throw new TransferError(`No task found for assistant: ${response.assistant}`);
+        }
+
+        this.currentTask = targetTask;
+        this.currentRun = null; // Reset run state for new task
+    }
+
+    // It should be called in the execute method when we detect a transfer response
+    public async execute(userInput: string): Promise<void> {
+        try {
+            if (!this.currentTask?.assistant) {
+                throw new Error('No current task or assistant set');
+            }
+
+            // Get the actual Assistant object using the name
+            const assistant = this.assistants.find(a => a.name === this.currentTask?.assistant);
+            if (!assistant) {
+                throw new Error(`No assistant found with name: ${this.currentTask?.assistant}`);
+            }
+
+            const response = await this.runRequest(
+                userInput,
+                assistant,
+                false
+            );
+
+            if (response && isTransferResponse(response)) {
+                await this.handleTransfer(
+                    response,
+                    this.thread,
+                    this.currentRun
+                );
+            }
+        } catch (error) {
+            console.error('Error executing request:', error);
+            throw error;
+        }
     }
 }

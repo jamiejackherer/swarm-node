@@ -3,8 +3,7 @@ import { Assistant } from '../../src/agents/Assistant';
 import { Tool } from '../../src/types/Tool';
 import { queryDocs } from '../../src/tools/queryDocs';
 import { QueryParamsSchema } from '../../src/types/QueryParams';
-import console from 'console';
-import { TransferResponse } from '../../src/types/Transfer';
+import { createTransferTool } from '../../src/types/TransferTools';
 
 function isQueryParams(obj: unknown): obj is QueryParamsSchema {
     if (typeof obj !== 'object' || obj === null) return false;
@@ -119,54 +118,21 @@ IMPORTANT: Always use the query_docs tool before responding to ensure you have t
 
 // Then define transfer functions with proper signatures
 const transferFunctions: Record<string, Tool> = {
-    transferToSales: {
-        name: "transferToSales",
-        function: async (...args: unknown[]): Promise<TransferResponse> => {
-            const request = typeof args[0] === 'string' ? args[0] : '';
-            console.log("[mock] Transferring to Sales Assistant with request:", request);
-
-            return {
-                action: 'transfer',
-                assistant: "Sales Assistant",
-                context: {
-                    request,
-                    history: [{ role: 'user', content: request }]
-                }
-            };
-        }
-    },
-    transferToRefunds: {
-        name: "transferToRefunds",
-        function: async (...args: unknown[]): Promise<TransferResponse> => {
-            const request = typeof args[0] === 'string' ? args[0] : '';
-            console.log("[mock] Transferring to Refunds Assistant with request:", request);
-
-            return {
-                action: 'transfer',
-                assistant: "Refunds Assistant",
-                context: {
-                    request,
-                    history: [{ role: 'user', content: request }]
-                }
-            };
-        }
-    },
-    transferBackToTriage: {
-        name: "transferBackToTriage",
-        function: async (...args: unknown[]): Promise<TransferResponse> => {
-            const request = typeof args[0] === 'string' ? args[0] : '';
-            console.log("[mock] Transferring back to Triage Assistant with request:", request);
-
-            return {
-                action: 'transfer',
-                assistant: "Triage Assistant",
-                context: {
-                    request,
-                    history: [{ role: 'user', content: request }]
-                }
-            };
-        }
-    }
+    transferToSales: createTransferTool(
+        "transferToSales",
+        "Transfer the conversation to the Sales Assistant",
+        "Sales Assistant"
+    ),
+    transferToRefunds: createTransferTool(
+        "transferToRefunds",
+        "Transfer the conversation to the Refunds Assistant",
+        "Refunds Assistant"
+    ),
+    transferBackToTriage: createTransferTool(
+        "transferBackToTriage",
+        "Transfer the conversation back to the Triage Assistant",
+        "Triage Assistant"
+    )
 };
 
 // Add transfer functions to assistants
